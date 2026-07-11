@@ -6570,7 +6570,15 @@ function buildPanel() {
   // ChatGPT). Clicking one asks the pack to ensure that backend's orchestrator is
   // running and returns the bridge URL to connect to — the user never types a
   // port. Populated from GET /comfyui_mcp_panel/backends when settings open.
-  const BACKEND_LABELS = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", grok: "Grok", kimi: "Kimi", ollama: "Ollama", openrouter: "OpenRouter" };
+  const BACKEND_LABELS = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", grok: "Grok", kimi: "Kimi", ollama: "Ollama", openrouter: "OpenRouter", copilot: "GitHub Copilot" };
+  // Appends a visible "(experimental)" marker to a backend's display label when
+  // the readiness data flags it (b.experimental, e.g. Copilot — device-code,
+  // GitHub ToS risk). Keeps picking it a deliberate, informed act everywhere a
+  // provider name is rendered, not just in the sign-in credentials card.
+  function backendDisplayLabel(id, b) {
+    const label = BACKEND_LABELS[id] || id;
+    return b && b.experimental ? `${label} (experimental)` : label;
+  }
   const backendLabel = document.createElement("label");
   backendLabel.className = "cmcp-label";
   backendLabel.textContent = "Agent backend";
@@ -6648,7 +6656,7 @@ function buildPanel() {
       chip.type = "button";
       chip.className = "cmcp-btn cmcp-backend-chip";
       chip.dataset.backend = id;
-      chip.textContent = BACKEND_LABELS[id] || id;
+      chip.textContent = backendDisplayLabel(id, b);
       const hint = notReadyHint(b);
       if (hint) {
         chip.title = hint;
@@ -6659,6 +6667,15 @@ function buildPanel() {
       if (id === selectedBackend) {
         chip.style.cssText =
           "background:var(--p-primary-color,#2563eb);color:var(--p-primary-contrast-color,#fff);border-color:transparent;";
+      }
+      if (b.experimental) {
+        // Applied AFTER the selected-background cssText above (which would
+        // otherwise wipe it via a full style reset) — an amber outline that
+        // stays visible whether or not the backend is selected/ready, so
+        // picking a ToS-risk provider is always a deliberate, informed act.
+        chip.style.borderColor = "var(--p-orange-500,#f59e0b)";
+        if (id !== selectedBackend) chip.style.color = "var(--p-orange-500,#f59e0b)";
+        if (!hint) chip.title = "Experimental — signs in as VS Code, against GitHub's Copilot API terms";
       }
       chip.addEventListener("click", () => connectBackend(id));
       backendChips.appendChild(chip);
@@ -6988,8 +7005,11 @@ function buildPanel() {
     if (!opts?.fromOrchestrator) return;
     const sel = list.find((b) => b.backend === selectedBackend);
     if (sel && sel.ready === false) {
-      // Never fall back to a provider the user turned off (chip hidden = not a target).
-      const ready = list.find((b) => b.ready && backendEnabled(b.backend));
+      // Never fall back to a provider the user turned off (chip hidden = not a
+      // target), and never to an experimental backend (b.experimental, e.g.
+      // Copilot) — those must only become active via explicit user selection
+      // in the provider picker, not silently behind the user's back.
+      const ready = list.find((b) => b.ready && !b.experimental && backendEnabled(b.backend));
       if (ready) {
         autoPickDone = true;
         const prevLabel = BACKEND_LABELS[selectedBackend] || selectedBackend;
@@ -7577,8 +7597,11 @@ function buildPanel() {
         // agent to help you install/sign in instead of failing a connect.
         const small = notReady ? `Tap to set up — ${hint}` : BACKEND_HINTS[id] || (id === activeBackend ? "connected" : b.running ? "running" : "");
         // cmcp-provider: the NAME never shrinks; a long hint truncates instead
-        // (a long hint used to collapse "Ollama" to nothing).
-        const row = item({ label: BACKEND_LABELS[id] || id, small, cls: "cmcp-provider" }, id === activeBackend, () => {
+        // (a long hint used to collapse "Ollama" to nothing). backendDisplayLabel
+        // appends "(experimental)" for ToS-risk backends (e.g. Copilot) so picking
+        // one from this — the main provider picker — is always an informed act,
+        // not just in the sign-in credentials card.
+        const row = item({ label: backendDisplayLabel(id, b), small, cls: "cmcp-provider" }, id === activeBackend, () => {
           modelPop.hidden = true;
           if (notReady) {
             requestProviderSetup(id);
@@ -7586,6 +7609,7 @@ function buildPanel() {
             connectBackend(id);
           }
         });
+        if (b.experimental && row) row.style.color = "var(--p-orange-500,#f59e0b)";
         // Provider on/off: a small always-visible ✕ that hides this provider from
         // the panel (list + fallback). Not shown on the active provider.
         if (id !== activeBackend && row) {
