@@ -13,3 +13,4 @@ playwright-report/
 test-results/
 .playwright/
 .superpowers/
+vendor-spike/node_modules/

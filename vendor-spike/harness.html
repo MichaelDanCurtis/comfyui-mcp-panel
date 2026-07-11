@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>a2ui-lit vendor spike harness</title>
+<style>
+  /* --- Panel dark theme, mirrored from web/js/comfyui-mcp-panel.js --- */
+  :root {
+    --p-content-background: #18181b;
+    --p-surface-800: #27272a;
+    --p-surface-900: #18181b;
+    --p-content-border-color: #3f3f46;
+    --p-text-color: #e4e4e7;
+    --p-text-muted-color: #a1a1aa;
+    --p-primary-color: #60a5fa;
+    --p-primary-contrast-color: #18181b;
+
+    /* --- a2ui-lit base token overrides (theming test: ~18 lines) --- */
+    --a2ui-color-background: var(--p-content-background);
+    --a2ui-color-on-background: var(--p-text-color);
+    --a2ui-color-surface: var(--p-surface-800);
+    --a2ui-color-on-surface: var(--p-text-color);
+    --a2ui-color-border: var(--p-content-border-color);
+    --a2ui-color-input: var(--p-surface-900);
+    --a2ui-color-on-input: var(--p-text-color);
+    --a2ui-color-primary: var(--p-primary-color);
+    --a2ui-color-on-primary: var(--p-primary-contrast-color);
+    --a2ui-color-primary-hover: #7db8fb;
+    --a2ui-color-secondary: var(--p-surface-800);
+    --a2ui-color-on-secondary: var(--p-text-color);
+    --a2ui-color-secondary-hover: var(--p-content-border-color);
+    --a2ui-border-radius: 6px;
+    --a2ui-border-width: 1px;
+    --a2ui-spacing-xs: 4px;
+    --a2ui-spacing-s: 8px;
+    --a2ui-spacing-m: 12px;
+    --a2ui-spacing-l: 16px;
+  }
+  body {
+    background: var(--p-content-background);
+    color: var(--p-text-color);
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    padding: 24px;
+  }
+  h2 { color: var(--p-text-muted-color); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .fixture {
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+    background: var(--p-surface-900);
+    max-width: 420px;
+  }
+  #log {
+    white-space: pre-wrap;
+    font-family: ui-monospace, monospace;
+    font-size: 0.75rem;
+    color: var(--p-text-muted-color);
+    border-top: 1px solid var(--p-content-border-color);
+    padding-top: 8px;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <h1 style="color:var(--p-text-color)">a2ui/lit vendor spike</h1>
+
+  <h2>Fixture A — text + 3 buttons</h2>
+  <div class="fixture"><a2ui-surface id="surface-a"></a2ui-surface></div>
+
+  <h2>Fixture B — form (TextField + Select + submit Button)</h2>
+  <div class="fixture"><a2ui-surface id="surface-b"></a2ui-surface></div>
+
+  <h2>Fixture C — Card with nested Row/Column</h2>
+  <div class="fixture"><a2ui-surface id="surface-c"></a2ui-surface></div>
+
+  <div id="log">action log:</div>
+
+  <script type="module">
+    import { A2uiSurface, basicCatalog, MessageProcessor } from "./a2ui-lit.bundle.js";
+
+    const logEl = document.getElementById("log");
+    function log(msg) {
+      logEl.textContent += "\n" + msg;
+      console.log("[a2ui-spike]", msg);
+    }
+
+    // --- Adapter: our flat-list JSON-subset -> A2UI v0.9 messages ---
+    // Subset shape (from docs/superpowers/plans/2026-07-10-a2ui-chat.md):
+    //   { root: "<id>", components: [ {id, type, ...props} ] }
+    // Types handled here: Text, Heading, Button, Row, Column, Card, Divider,
+    // TextField, Select, Checkbox. (comfy:graph/comfy:chart stay hand-rolled
+    // regardless of GO/NO-GO -- not part of this fixture set.)
+    function adaptSpec(spec) {
+      const out = [];
+      const rootRenamed = spec.root === "root";
+      const renameId = (id) => (!rootRenamed && id === spec.root ? "root" : id);
+
+      for (const c of spec.components) {
+        const id = renameId(c.id);
+        switch (c.type) {
+          case "Text":
+            out.push({ id, component: "Text", text: c.text });
+            break;
+          case "Heading":
+            out.push({ id, component: "Text", text: c.text, variant: `h${c.level || 2}` });
+            break;
+          case "Button": {
+            const labelId = id + "__label";
+            out.push({ id: labelId, component: "Text", text: c.label });
+            out.push({
+              id, component: "Button", child: labelId,
+              variant: c.style === "primary" ? "primary" : "default",
+              action: { event: { name: "reply", context: { text: c.reply || c.label } } },
+            });
+            break;
+          }
+          case "Row":
+          case "Column":
+            out.push({ id, component: c.type, children: c.children.map(renameId) });
+            break;
+          case "Card": {
+            let childId = renameId(c.children[0]);
+            if (c.children.length > 1) {
+              const wrapId = id + "__col";
+              out.push({ id: wrapId, component: "Column", children: c.children.map(renameId) });
+              childId = wrapId;
+            }
+            out.push({ id, component: "Card", child: childId });
+            break;
+          }
+          case "Divider":
+            out.push({ id, component: "Divider" });
+            break;
+          case "TextField":
+            out.push({ id, component: "TextField", label: c.label, value: c.value || "" });
+            break;
+          case "Select":
+            out.push({
+              id, component: "ChoicePicker", label: c.label,
+              options: c.options.map((o) => ({ label: o.label, value: String(o.value ?? o.label) })),
+              value: c.value ? [String(c.value)] : [],
+            });
+            break;
+          case "Checkbox":
+            out.push({ id, component: "CheckBox", label: c.label, value: !!c.checked });
+            break;
+          default:
+            throw new Error("adapter: unmapped component type " + c.type);
+        }
+      }
+      return out;
+    }
+
+    function mountFixture(elId, spec) {
+      const processor = new MessageProcessor([basicCatalog], (action) => {
+        log(elId + " action: " + JSON.stringify(action));
+      });
+      const surfaceEl = document.getElementById(elId);
+      processor.onSurfaceCreated((s) => {
+        surfaceEl.surface = s;
+      });
+      processor.processMessages([
+        { version: "v0.9", createSurface: { surfaceId: elId, catalogId: basicCatalog.id } },
+        { version: "v0.9", updateComponents: { surfaceId: elId, components: adaptSpec(spec) } },
+      ]);
+    }
+
+    // Fixture A: text + 3 buttons
+    mountFixture("surface-a", {
+      root: "root",
+      components: [
+        { id: "root", type: "Column", children: ["txt", "row"] },
+        { id: "txt", type: "Text", text: "Pick an option:" },
+        { id: "row", type: "Row", children: ["b1", "b2", "b3"] },
+        { id: "b1", type: "Button", label: "Approve", style: "primary", reply: "Approve" },
+        { id: "b2", type: "Button", label: "Reject", reply: "Reject" },
+        { id: "b3", type: "Button", label: "Skip", reply: "Skip" },
+      ],
+    });
+
+    // Fixture B: form (TextField + Select + submit Button)
+    mountFixture("surface-b", {
+      root: "root",
+      components: [
+        { id: "root", type: "Column", children: ["name", "sel", "submit"] },
+        { id: "name", type: "TextField", label: "Workflow name", name: "name", placeholder: "my_workflow" },
+        {
+          id: "sel", type: "Select", label: "Sampler", name: "sampler",
+          options: [{ label: "Euler", value: "euler" }, { label: "DPM++ 2M", value: "dpmpp_2m" }],
+          value: "euler",
+        },
+        { id: "submit", type: "Button", label: "Run", style: "primary", submit: true, reply: "Run" },
+      ],
+    });
+
+    // Fixture C: Card with nested Row/Column
+    mountFixture("surface-c", {
+      root: "root",
+      components: [
+        { id: "root", type: "Card", children: ["col"] },
+        { id: "col", type: "Column", children: ["h", "r", "d"] },
+        { id: "h", type: "Heading", text: "Node summary", level: 3 },
+        { id: "r", type: "Row", children: ["l1", "l2"] },
+        { id: "l1", type: "Text", text: "CheckpointLoader" },
+        { id: "l2", type: "Text", text: "KSampler" },
+        { id: "d", type: "Divider" },
+      ],
+    });
+
+    log("mounted 3 fixtures; catalogId=" + basicCatalog.id);
+  </script>
+</body>
+</html>
