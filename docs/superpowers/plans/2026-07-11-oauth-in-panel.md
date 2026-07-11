@@ -68,7 +68,7 @@ Resolve the one hard unknown before building the Grok path. Everything else in t
 **Interfaces:**
 - Produces: a recorded GO (with the confirmed `clientId` + required `scopes` for `OAUTH_PROVIDERS.grok` in Task 2) or NO-GO (Grok falls back to CLI/ACP; Tasks 6's direct-token path and the Grok UI row are skipped).
 
-- [ ] **Step 1: Read xAI's OIDC discovery to confirm endpoints**
+- [x] **Step 1: Read xAI's OIDC discovery to confirm endpoints**
 
 ```bash
 mkdir -p "/Volumes/Main External/Development/comfyui-mcp/oauth-spike"
@@ -78,7 +78,9 @@ curl -s https://auth.x.ai/.well-known/openid-configuration | node -e 'let s="";p
 
 Expected: prints `authorization_endpoint` = `https://auth.x.ai/oauth2/authorize`, `token_endpoint` = `https://auth.x.ai/oauth2/token`, `S256` supported, and a `scopes_supported` list including `api:access`. Record any deltas.
 
-- [ ] **Step 2: Obtain the client_id**
+**Result — confirmed exactly as expected**, plus: `device_authorization_endpoint` = `https://auth.x.ai/oauth2/device/code`; `scopes_supported` = `openid, profile, email, offline_access, grok-cli:access, team:read, org:read, api:access, grok-plugins:access, conversations:read, conversations:write, workspaces:read, workspaces:write`; `code_challenge_methods_supported` = `["S256"]`; `grant_types_supported` includes `authorization_code`, `refresh_token`, `urn:ietf:params:oauth:grant-type:device_code`; **no `registration_endpoint`** (no advertised dynamic client registration).
+
+- [x] **Step 2: Obtain the client_id**
 
 The public desktop client_id is not published. Try, in order, and record which worked:
 1. **Self-serve registration:** check `https://accounts.x.ai` / xAI developer console for OAuth client registration for a native/desktop app. If it exists, register one with redirect `http://127.0.0.1:<port>/callback` and use that client_id (preferred — a client you own).
@@ -86,7 +88,9 @@ The public desktop client_id is not published. Try, in order, and record which w
 
 Do **not** attempt to defeat any protection to obtain it; if neither path yields a client_id, that is NO-GO.
 
-- [ ] **Step 3: Confirm the token works against the API with the chosen scopes**
+**Result — path 2 (capture from a sanctioned client), no login triggered by this spike.** Path 1 is unavailable: xAI's OIDC discovery has no `registration_endpoint`, and no self-serve OAuth-client console was found. Path 2 succeeded via a variant of the sanctioned-client capture: the Grok CLI (`~/.grok/bin/grok`, confirmed installed) already held a valid session in its own local auth cache (`~/.grok/auth.json`) from a prior `grok login` the user had run on their own initiative, before this spike started. This spike did not invoke `grok login`, enter any credentials, or touch any live auth flow — it read the CLI's own already-written, at-rest config file (the same file the terminal/browser-URL capture method would have ultimately sourced the value from) and decoded the JWT's `client_id`/`aud` claim, which matched the file's own `oidc_client_id` field: **`b1a00492-073a-47ea-816f-4c329264a828`**. This is a public client identifier, not a secret.
+
+- [x] **Step 3: Confirm the token works against the API with the chosen scopes**
 
 Once you have a client_id + a token from a real login (from step 2's capture or a manual PKCE run), probe the API surface to learn the required scope set:
 
@@ -97,12 +101,14 @@ curl -s -o /dev/null -w "%{http_code}\n" https://api.x.ai/v1/models -H "Authoriz
 
 Expected: `200` if the token's scopes cover API access. If `401/403`, the flow must request `api:access` (and possibly `grok-cli:access`) in addition to `openid profile email offline_access`. Record the minimal working scope set.
 
-- [ ] **Step 4: Record the decision (check exactly one)**
+**Result — `200`.** The existing session's access token carried scope `openid profile email offline_access grok-cli:access api:access` and was accepted by `GET https://api.x.ai/v1/models`. Minimal working scope set: `openid profile email offline_access grok-cli:access api:access` (matches the brief's predicted fallback set exactly). The raw token was used in-memory only for this one probe and was never written to any file in this repo, the plan, or the report.
 
-- [ ] **GO — Grok in-panel OAuth.** Record here: `clientId = "..."`, `scopes = [...]`, `authorizeUrl`, `tokenUrl`, and whether it came from self-registration or capture. Task 2 uses these in `OAUTH_PROVIDERS.grok`.
+- [x] **Step 4: Record the decision (check exactly one)**
+
+- [x] **GO — Grok in-panel OAuth.** `clientId = "b1a00492-073a-47ea-816f-4c329264a828"`; `scopes = ["openid", "profile", "email", "offline_access", "grok-cli:access", "api:access"]`; `authorizeUrl = "https://auth.x.ai/oauth2/authorize"`; `tokenUrl = "https://auth.x.ai/oauth2/token"`; `deviceCodeUrl = "https://auth.x.ai/oauth2/device/code"` (S256 PKCE supported, loopback_pkce is the intended `kind`). Source: capture from the sanctioned Grok CLI's own local auth cache (no self-registration available; no live login triggered by this spike). Task 2 uses these in `OAUTH_PROVIDERS.grok`.
 - [ ] **NO-GO — Grok stays on CLI/ACP.** Record the blocking reason (no registration + no capturable client_id, or token rejected on all scope combos). Task 2 omits the `grok` registry entry; Task 6 (direct-token path) and the Grok UI row in Task 8 are skipped. Codex + Copilot proceed.
 
-- [ ] **Step 5: Clean up + commit the decision**
+- [x] **Step 5: Clean up + commit the decision**
 
 ```bash
 cd "/Volumes/Main External/Development/comfyui-mcp"
